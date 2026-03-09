@@ -1,9 +1,9 @@
-<!DOCTYPE html>    <!-- No se cargan los productos de la tabla derecha de los productos. Hay que corregir logica en "loadProductRules" -->
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de Fichas PDF (con dos columnas de productos)</title>
+    <title>Generador de Fichas PDF</title>
 
     <!-- LIBRERÍAS LOCALES (descargar y colocar en ./libs/) -->
     <script src="libs/pdf-lib.min.js"></script>
@@ -59,7 +59,7 @@
 </head>
 <body>
 <div class="container">
-    <h1>📦 Generador de Fichas PDF (con dos columnas de productos)</h1>
+    <h1>📦 Generador de Fichas PDF</h1>
     <p class="subtitle">Rellena fichas con datos personales + cantidades en columna izquierda/derecha según producto · Todo en un solo paso</p>
 
     <!-- Library status (local) -->
@@ -87,14 +87,14 @@
 
     <!-- STEP 2: Paste people data -->
     <div class="card">
-        <div class="card-header"><span class="step-num">2</span><h2>Pegar datos de personas (desde Excel)</h2></div>
-        <textarea id="pasteArea" placeholder="Ctrl+V aquí... (columnas: Apellidos, Nombre, Tipo, DNI/NIE, N° Adultos)"></textarea>
+        <div class="card-header"><span class="step-num">2</span><h2>Pegar lista de personas</h2><h4>(desde Excel u otra lista)</h4></div>
+        <textarea id="pasteArea" placeholder="Ctrl+V aquí... (columnas: Apellidos, Nombre, Tipo, DNI/NIE, N° Adultos, Menores)"></textarea>
         <div class="textarea-hint">La primera fila debe ser la cabecera. La columna 'Tipo' debe contener el código de familia (Ind, F.A., etc.).</div>
     </div>
 
     <!-- STEP 3: Product Excel (rules) -->
     <div class="card">
-        <div class="card-header"><span class="step-num">3</span><h2>Excel de productos (reglas)</h2></div>
+        <div class="card-header"><span class="step-num">3</span><h2>Excel de productos</h2><h4>(con reglas de distribución por tipo de familia)</h4></div>
         <div class="file-drop" id="productExcelDrop">
             <input type="file" id="productExcelFile" accept=".xlsx, .xls, .xltx, .xlsm, .xlsb, .xltm">
             <div class="icon">📊</div>
@@ -109,6 +109,7 @@
         <div class="card-header" id="step4Header" style="cursor: pointer;">
             <span class="step-num">4</span>
             <h2>Asignar columnas de personas</h2>
+            <h4>(ignorar por defecto)</h4>
             <span id="step4Toggle">▼</span>   <!-- Icono que cambiará -->
         </div>
         <div id="step4Content">   <!-- Todo este div se colapsará -->
@@ -119,6 +120,8 @@
                 <div class="field-row"><label>Tipo / Familia</label><select id="colTipo"></select></div>
                 <div class="field-row"><label>DNI / NIE</label><select id="colDNI"></select></div>
                 <div class="field-row"><label>N° Adultos</label><select id="colNumAdultos"></select></div>
+                <div class="field-row"><label>N° Menores</label><select id="colNumMenores"></select></div>
+
             </div>
             <div id="previewInfo"></div>
         </div>
@@ -129,6 +132,7 @@
         <div class="card-header" id="step5Header" style="cursor: pointer;">
             <span class="step-num">5</span>
             <h2>Coordenadas de campos personales (por página)</h2>
+            <h4>(ignorar por defecto)</h4>
             <span id="step5Toggle">▼</span>   <!-- Icono que cambiará -->
         </div>
         <div id="step5Content">   <!-- Todo este div se colapsará -->
@@ -204,6 +208,7 @@
     const colTipo = document.getElementById('colTipo');
     const colDNI = document.getElementById('colDNI');
     const colNumAdultos = document.getElementById('colNumAdultos');
+    const colNumMenores = document.getElementById('colNumMenores');
     const coordsContainer = document.getElementById('coordsContainer');
     const pagesInput = document.getElementById('pagesInput');
     const processBtn = document.getElementById('processBtn');
@@ -228,7 +233,8 @@
         nombre: { x: 230, y: 671 },
         tipo:   { x: 280, y: 691 },
         dni:    { x: 420, y: 691 },
-        numAdultos: { x: 450, y: 652 }
+        numAdultos: { x: 450, y: 652 },
+        numMenores: { x: 295, y: 652 }
     };
     const STORAGE_KEY = 'defaultCoords';
 
@@ -283,6 +289,7 @@
             '<th>Tipo X</th><th>Tipo Y</th>' +
             '<th>DNI X</th><th>DNI Y</th>' +
             '<th>N° Adultos X</th><th>N° Adultos Y</th>' +
+            '<th>Menores X</th><th>Menores Y</th>' +
             '</tr></thead><tbody>';
 
         for (let p = 0; p < pageCount; p++) {
@@ -294,6 +301,8 @@
             let dniY    = DEFAULT_COORDS.dni.y;
             let numAdultosX = DEFAULT_COORDS.numAdultos.x;
             let numAdultosY = DEFAULT_COORDS.numAdultos.y;
+            let numMenoresX = DEFAULT_COORDS.numMenores.x;
+            let numMenoresY = DEFAULT_COORDS.numMenores.y;
 
             if (savedDefaults && savedDefaults[p]) {
                 const pageData = savedDefaults[p];
@@ -313,6 +322,10 @@
                     if (pageData.numAdultos.x !== undefined) numAdultosX = pageData.numAdultos.x;
                     if (pageData.numAdultos.y !== undefined) numAdultosY = pageData.numAdultos.y;
                 }
+                if (pageData.numMenores) {
+                    if (pageData.numMenores.x !== undefined) numMenoresX = pageData.numMenores.x;
+                    if (pageData.numMenores.y !== undefined) numMenoresY = pageData.numMenores.y;
+                }
             }
 
             html += `<tr>
@@ -325,6 +338,8 @@
                 <td><input type="number" class="coord-input" data-page="${p}" data-field="dni" data-axis="y" value="${dniY}"></td>
                 <td><input type="number" class="coord-input" data-page="${p}" data-field="numAdultos" data-axis="x" value="${numAdultosX}"></td>
                 <td><input type="number" class="coord-input" data-page="${p}" data-field="numAdultos" data-axis="y" value="${numAdultosY}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="numMenores" data-axis="x" value="${numMenoresX}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="numMenores" data-axis="y" value="${numMenoresY}"></td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -340,14 +355,14 @@
             const page = input.dataset.page;
             const field = input.dataset.field;
             const axis = input.dataset.axis;
-            if (!pagesMap[page]) pagesMap[page] = { nombre: {}, tipo: {}, dni: {}, numAdultos: {} };
+            if (!pagesMap[page]) pagesMap[page] = { nombre: {}, tipo: {}, dni: {}, numAdultos: {}, numMenores: {} };
             if (!pagesMap[page][field]) pagesMap[page][field] = {};
             pagesMap[page][field][axis] = parseFloat(input.value) || 0;
         });
         const pageCount = Object.keys(pagesMap).length;
         const coordsArray = [];
         for (let i = 0; i < pageCount; i++) {
-            coordsArray[i] = pagesMap[i] || { nombre: {}, tipo: {}, dni: {}, numAdultos: {} };
+            coordsArray[i] = pagesMap[i] || { nombre: {}, tipo: {}, dni: {}, numAdultos: {}, numMenores: {} };
         }
         return coordsArray;
     }
@@ -421,7 +436,7 @@
         if (idx !== -1) sel.value = String(idx);
     }
     function rebuildSelects(headers) {
-        [colApellidos, colNombre, colTipo, colDNI, colNumAdultos].forEach(sel => {
+        [colApellidos, colNombre, colTipo, colDNI, colNumAdultos, colNumMenores].forEach(sel => {
             sel.innerHTML = '';
             headers.forEach((h, i) => sel.add(new Option(h || `(columna ${i+1})`, i)));
         });
@@ -430,6 +445,8 @@
         autoSelect(colTipo,      headers, ['tipo', 'familia', 'categoria']);
         autoSelect(colDNI,       headers, ['dni', 'nie', 'nif']);
         autoSelect(colNumAdultos, headers, ['numero', 'adultos', 'n°', 'num', 'nº', 'n0']);
+        autoSelect(colNumMenores, headers, ['menores', 'ninos', 'niños']);
+
     }
     function updateUIMapping() {
         const text = pasteArea.value.trim();
@@ -687,7 +704,8 @@
         const iTip = parseInt(colTipo.value);
         const iDni = parseInt(colDNI.value);
         const iNumAdultos = parseInt(colNumAdultos.value);
-        if (isNaN(iApe) || isNaN(iNom) || isNaN(iTip) || isNaN(iDni) || isNaN(iNumAdultos)) {
+        const iNumMenores = parseInt(colNumMenores.value);
+        if (isNaN(iApe) || isNaN(iNom) || isNaN(iTip) || isNaN(iDni) || isNaN(iNumAdultos) || isNaN(iNumMenores)) {
             showAlert('Asigna todas las columnas en el paso 4.');
             return;
         }
@@ -773,8 +791,9 @@
             const tipoRaw = (cells[iTip] || '').trim();
             const dni = (cells[iDni] || '').trim();
             const numAdultos = (cells[iNumAdultos] || '').trim();
+            const numMenores = (cells[iNumMenores] || '').trim();
 
-            if (!apellidos && !nombre && !dni && !numAdultos) {
+            if (!apellidos && !nombre && !dni && !numAdultos && !numMenores) {
                 logWarn(`Fila ${i+2}: vacía, omitida.`);
                 setProgress(i+1, parsedRows.length);
                 continue;
@@ -817,6 +836,7 @@
                     draw('tipo', tipoRaw);
                     draw('dni', dni);
                     draw('numAdultos', numAdultos);
+                    draw('numMenores', numMenores);
                 }
 
                 // Dibujar cantidades de productos en la primera página
