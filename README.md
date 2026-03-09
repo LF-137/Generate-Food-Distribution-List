@@ -43,3 +43,8 @@ The script generates a **personalized PDF document** for every individual on the
 *   **HTML/JavaScript:** For the automation logic and user interface.
 *   **PDF Integration:** For handling and filling existing templates.
 *   **Excel Parsing:** For reading monthly product data.
+
+## Interface
+
+This is how the script looks like. It guides step by step each action required.
+<img width="981" height="925" alt="Interface" src="https://github.com/user-attachments/assets/891b0bcc-42b7-456c-834b-81c0be034644" />
