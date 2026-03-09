@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Fichas PDF (con dos columnas de productos)</title>
+
+    <!-- LIBRERÍAS LOCALES (descargar y colocar en ./libs/) -->
+    <script src="libs/pdf-lib.min.js"></script>
+    <script src="libs/jszip.min.js"></script>
+    <script src="libs/pdf.min.js"></script>  
+    <script src="libs/xlsx.full.min.js"></script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 2rem 1rem; }
+        .container { max-width: 1200px; margin: auto; }
+        h1 { font-size: 1.6rem; }
+        .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
+        .card { background: white; border-radius: 10px; padding: 1.4rem 1.6rem; margin-bottom: 1.1rem; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e4e6ea; }
+        .card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
+        .step-num { background: #2563eb; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; }
+        .file-drop { border: 2px dashed #c8cdd6; border-radius: 8px; padding: 1.4rem; text-align: center; cursor: pointer; background: #f8f9fa; position: relative; }
+        .file-drop:hover { border-color: #2563eb; background: #eff6ff; }
+        .file-drop input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        #pdfName, #productExcelName { font-size: 0.82rem; color: #2563eb; font-weight: 600; margin-top: 0.4rem; display: none; }
+        textarea { width: 100%; height: 120px; font-family: monospace; font-size: 0.82rem; border: 1px solid #d1d5db; border-radius: 7px; padding: 0.75rem; background: #fafafa; }
+        .mapping-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+        .field-row label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+        .field-row select { width: 100%; padding: 0.45rem; border: 1px solid #d1d5db; border-radius: 6px; }
+        .coords-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 1rem; }
+        .coords-table th, .coords-table td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: center; }
+        .coords-table input[type="number"] { width: 70px; padding: 0.25rem; text-align: center; border: 1px solid #ccc; border-radius: 4px; }
+        .coords-note { font-size: 0.78rem; color: #6b7280; margin-top: 1rem; background: #f9fafb; padding: 0.5rem; border-left: 3px solid #d1d5db; }
+        .pages-selector { margin-top: 1rem; border-top: 1px dashed #ccc; padding-top: 1rem; }
+        .pages-selector input { width: 100%; padding: 0.45rem; border: 1px solid #d1d5db; border-radius: 6px; }
+        .button-group { display: flex; gap: 0.5rem; margin: 1rem 0; }
+        .button-group button { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-secondary { background: #e5e7eb; color: #1f2937; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-secondary:hover { background: #d1d5db; }
+        #processBtn { width: 100%; padding: 0.9rem; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
+        #processBtn:disabled { background: #9ca3af; cursor: not-allowed; }
+        #log { background: #111827; color: #d1d5db; border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 0.78rem; max-height: 220px; overflow-y: auto; display: none; }
+        .lib-badge { padding: 0.28rem 0.7rem; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+        .lib-badge.ok { background: #d1e7dd; color: #0f5132; }
+        .lib-badge.fail { background: #f8d7da; color: #842029; }
+        .alert-banner { padding: 0.65rem; border-radius: 7px; background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; margin-bottom: 1rem; display: none; }
+        #coordsContainer { min-height: 100px; }
+        .config-row { margin-bottom: 1rem; }
+        .config-row label { font-weight: 600; display: block; margin-bottom: 0.3rem; }
+        #step4Header {cursor: pointer; user-select: none; }
+        #step4Toggle {margin-left: auto; font-size: 1.2rem; transition: transform 0.2s; }
+        #step5Header {cursor: pointer; user-select: none; }
+        #step5Toggle {margin-left: auto; font-size: 1.2rem; transition: transform 0.2s; }
+        
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📦 Generador de Fichas PDF (con dos columnas de productos)</h1>
+    <p class="subtitle">Rellena fichas con datos personales + cantidades en columna izquierda/derecha según producto · Todo en un solo paso</p>
+
+    <!-- Library status (local) -->
+    <div id="libStatus">
+        <span class="lib-badge" id="badge-pdflib">⏳ pdf-lib (local) cargando...</span>
+        <span class="lib-badge" id="badge-jszip">⏳ JSZip (local) cargando...</span>
+        <span class="lib-badge" id="badge-pdfjs">⏳ pdf.js (local) cargando...</span>
+        <span class="lib-badge" id="badge-sheetjs">⏳ SheetJS (local) cargando...</span>
+    </div>
+    <div id="libAlert" class="alert-banner">
+        Las librerías locales no se cargaron. Asegúrate de que los archivos están en la carpeta "libs".
+    </div>
+
+    <!-- STEP 1: PDF Template -->
+    <div class="card">
+        <div class="card-header"><span class="step-num">1</span><h2>Plantilla PDF</h2></div>
+        <div class="file-drop" id="pdfDrop">
+            <input type="file" id="pdfFile" accept=".pdf">
+            <div class="icon">📄</div>
+            <div class="label">Haz clic o arrastra tu plantilla PDF</div>
+            <div class="hint">Solo .pdf (la tabla de productos debe estar en la primera página)</div>
+            <div id="pdfName"></div>
+        </div>
+    </div>
+
+    <!-- STEP 2: Paste people data -->
+    <div class="card">
+        <div class="card-header"><span class="step-num">2</span><h2>Pegar datos de personas (desde Excel)</h2></div>
+        <textarea id="pasteArea" placeholder="Ctrl+V aquí... (columnas: Apellidos, Nombre, Tipo, DNI/NIE, N° Adultosm, Menores)"></textarea>
+        <div class="textarea-hint">La primera fila debe ser la cabecera. La columna 'Tipo' debe contener el código de familia (Ind, F.A., etc.).</div>
+    </div>
+
+    <!-- STEP 3: Product Excel (rules) -->
+    <div class="card">
+        <div class="card-header"><span class="step-num">3</span><h2>Excel de productos (reglas)</h2></div>
+        <div class="file-drop" id="productExcelDrop">
+            <input type="file" id="productExcelFile" accept=".xlsx, .xls, .xltx, .xlsm, .xlsb, .xltm">
+            <div class="icon">📊</div>
+            <div class="label">Haz clic o arrastra el Excel con las cantidades por familia</div>
+            <div class="hint">Formato: dos tablas (izquierda/derecha), Empieza en fila de "PRODUCTOS" y termina con "TOTALES"</div>
+            <div id="productExcelName"></div>
+        </div>
+    </div>
+
+    <!-- STEP 4: Map columns (personal data) -->
+    <div class="card">
+        <div class="card-header" id="step4Header" style="cursor: pointer;">
+            <span class="step-num">4</span>
+            <h2>Asignar columnas de personas</h2>
+            <span id="step4Toggle">▼</span>   <!-- Icono que cambiará -->
+        </div>
+        <div id="step4Content">   <!-- Todo este div se colapsará -->
+            <div id="noDataMsg" style="color:#9ca3af;">Pega primero los datos en el paso 2.</div>
+            <div class="mapping-grid" id="mappingGrid" style="display:none;">
+                <div class="field-row"><label>Apellidos</label><select id="colApellidos"></select></div>
+                <div class="field-row"><label>Nombre</label><select id="colNombre"></select></div>
+                <div class="field-row"><label>Tipo / Familia</label><select id="colTipo"></select></div>
+                <div class="field-row"><label>DNI / NIE</label><select id="colDNI"></select></div>
+                <div class="field-row"><label>N° Adultos</label><select id="colNumAdultos"></select></div>
+                <div class="field-row"><label>N° Menores</label><select id="colNumMenores"></select></div>
+
+            </div>
+            <div id="previewInfo"></div>
+        </div>
+    </div>
+
+    <!-- STEP 5: Coordinates for personal fields (per page) -->
+    <div class="card">
+        <div class="card-header" id="step5Header" style="cursor: pointer;">
+            <span class="step-num">5</span>
+            <h2>Coordenadas de campos personales (por página)</h2>
+            <span id="step5Toggle">▼</span>   <!-- Icono que cambiará -->
+        </div>
+        <div id="step5Content">   <!-- Todo este div se colapsará -->
+            <div id="coordsContainer">
+                <p class="text-muted">Carga un PDF en el paso 1 para configurar las coordenadas.</p>
+            </div>
+            <div class="button-group">
+                <button id="saveDefaultsBtn" class="btn-primary" disabled>💾 Guardar como predeterminado</button>
+                <button id="resetDefaultsBtn" class="btn-secondary" disabled>↺ Restablecer predeterminados</button>
+            </div>
+            <div class="pages-selector">
+                <label>📄 Páginas donde insertar texto (vacío = todas):</label>
+                <input type="text" id="pagesInput" placeholder="Ej: 1,2,4">
+            </div>
+            <div class="coords-note">
+                Origen (0,0) = esquina inferior izquierda. A4 = 595x842 puntos.<br>
+                Las coordenadas de los productos se detectan automáticamente (izquierda/derecha).
+            </div>
+        </div>
+    </div>
+
+    <!-- STEP 6: Process -->
+    <div class="card">
+        <div class="card-header"><span class="step-num">6</span><h2>Generar ZIP</h2></div>
+        <div id="processAlert"></div>
+        <button id="processBtn">⚙️ Procesar y descargar ZIP</button>
+        <div id="progressWrap" style="display:none;">
+            <div id="progressBar" style="width:0%; height:6px; background:#2563eb; border-radius:3px;"></div>
+            <div id="progressLabel">Iniciando...</div>
+        </div>
+        <div id="log"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    // Verificar librerías locales
+    function checkLibs() {
+        const pdfLibOk = typeof PDFLib !== 'undefined';
+        const jszipOk = typeof JSZip !== 'undefined';
+        const pdfJsOk = typeof pdfjsLib !== 'undefined';
+        const sheetJsOk = typeof XLSX !== 'undefined';
+        document.getElementById('badge-pdflib').textContent = pdfLibOk ? '✅ pdf-lib OK' : '❌ pdf-lib FALLO';
+        document.getElementById('badge-pdflib').className = 'lib-badge ' + (pdfLibOk ? 'ok' : 'fail');
+        document.getElementById('badge-jszip').textContent = jszipOk ? '✅ JSZip OK' : '❌ JSZip FALLO';
+        document.getElementById('badge-jszip').className = 'lib-badge ' + (jszipOk ? 'ok' : 'fail');
+        document.getElementById('badge-pdfjs').textContent = pdfJsOk ? '✅ pdf.js OK' : '❌ pdf.js FALLO';
+        document.getElementById('badge-pdfjs').className = 'lib-badge ' + (pdfJsOk ? 'ok' : 'fail');
+        document.getElementById('badge-sheetjs').textContent = sheetJsOk ? '✅ SheetJS OK' : '❌ SheetJS FALLO';
+        document.getElementById('badge-sheetjs').className = 'lib-badge ' + (sheetJsOk ? 'ok' : 'fail');
+        document.getElementById('libAlert').style.display = (!pdfLibOk || !jszipOk || !pdfJsOk || !sheetJsOk) ? 'block' : 'none';
+        return pdfLibOk && jszipOk && pdfJsOk && sheetJsOk;
+    }
+
+    // Configurar worker de pdf.js (local)
+    if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdf.worker.min.js';
+    }
+
+    // Elementos
+    const pdfInput = document.getElementById('pdfFile');
+    const pdfName = document.getElementById('pdfName');
+    const productExcelInput = document.getElementById('productExcelFile');
+    const productExcelName = document.getElementById('productExcelName');
+    const pasteArea = document.getElementById('pasteArea');
+    const mappingGrid = document.getElementById('mappingGrid');
+    const noDataMsg = document.getElementById('noDataMsg');
+    const previewInfo = document.getElementById('previewInfo');
+    const colApellidos = document.getElementById('colApellidos');
+    const colNombre = document.getElementById('colNombre');
+    const colTipo = document.getElementById('colTipo');
+    const colDNI = document.getElementById('colDNI');
+    const colNumAdultos = document.getElementById('colNumAdultos');
+    const colNumMenores = document.getElementById('colNumMenores');
+    const coordsContainer = document.getElementById('coordsContainer');
+    const pagesInput = document.getElementById('pagesInput');
+    const processBtn = document.getElementById('processBtn');
+    const logEl = document.getElementById('log');
+    const progressWrap = document.getElementById('progressWrap');
+    const progressBar = document.getElementById('progressBar');
+    const progressLabel = document.getElementById('progressLabel');
+    const processAlert = document.getElementById('processAlert');
+    const saveDefaultsBtn = document.getElementById('saveDefaultsBtn');
+    const resetDefaultsBtn = document.getElementById('resetDefaultsBtn');
+
+    // Estado
+    let parsedHeaders = [];
+    let parsedRows = [];
+    let currentPdfPageCount = 0;
+    let templatePdfBytes = null;
+    let productRules = null;
+    let textPositions = null; // { leftX, rightX, productInfo }
+
+    // Valores por defecto para campos personales
+    const DEFAULT_COORDS = {
+        nombre: { x: 230, y: 671 },
+        tipo:   { x: 280, y: 691 },
+        dni:    { x: 420, y: 691 },
+        numAdultos: { x: 450, y: 652 },
+        numMenores: { x: 295, y: 652 }
+    };
+    const STORAGE_KEY = 'defaultCoords';
+
+    // --- Funciones de utilidad ---
+    function log(msg, cls) {
+        logEl.style.display = 'block';
+        const span = document.createElement('span');
+        span.className = cls || '';
+        span.textContent = msg + '\n';
+        logEl.appendChild(span);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    const logOk = m => log('OK   ' + m, 'log-ok');
+    const logErr = m => log('ERR  ' + m, 'log-err');
+    const logInfo = m => log('INFO ' + m, 'log-info');
+    const logWarn = m => log('WARN ' + m, 'log-warn');
+
+    function showAlert(msg) { processAlert.textContent = msg; processAlert.style.display = 'block'; }
+    function hideAlert() { processAlert.style.display = 'none'; }
+
+    function setProgress(cur, total) {
+        const pct = total > 0 ? Math.round(cur/total*100) : 0;
+        progressBar.style.width = pct + '%';
+        progressLabel.textContent = `Generando ${cur} de ${total} (${pct}%)`;
+    }
+
+    // --- Gestión de localStorage para defaults de campos personales ---
+    function loadSavedDefaults() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                return null;
+            }
+        }
+        return null;
+    }
+    function saveDefaultsToStorage(coordsArray) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(coordsArray));
+    }
+    function clearDefaults() {
+        localStorage.removeItem(STORAGE_KEY);
+    }
+
+    // --- Generar tabla de coordenadas personales ---
+    function generateCoordsTable(pageCount) {
+        const savedDefaults = loadSavedDefaults();
+        let html = '<table class="coords-table"><thead><tr>' +
+            '<th>Página</th>' +
+            '<th>Nombre X</th><th>Nombre Y</th>' +
+            '<th>Tipo X</th><th>Tipo Y</th>' +
+            '<th>DNI X</th><th>DNI Y</th>' +
+            '<th>N° Adultos X</th><th>N° Adultos Y</th>' +
+            '<th>Menores X</th><th>Menores Y</th>' +
+            '</tr></thead><tbody>';
+
+        for (let p = 0; p < pageCount; p++) {
+            let nombreX = DEFAULT_COORDS.nombre.x;
+            let nombreY = DEFAULT_COORDS.nombre.y;
+            let tipoX   = DEFAULT_COORDS.tipo.x;
+            let tipoY   = DEFAULT_COORDS.tipo.y;
+            let dniX    = DEFAULT_COORDS.dni.x;
+            let dniY    = DEFAULT_COORDS.dni.y;
+            let numAdultosX = DEFAULT_COORDS.numAdultos.x;
+            let numAdultosY = DEFAULT_COORDS.numAdultos.y;
+            let numMenoresX = DEFAULT_COORDS.numMenores.x;
+            let numMenoresY = DEFAULT_COORDS.numMenores.y;
+
+            if (savedDefaults && savedDefaults[p]) {
+                const pageData = savedDefaults[p];
+                if (pageData.nombre) {
+                    if (pageData.nombre.x !== undefined) nombreX = pageData.nombre.x;
+                    if (pageData.nombre.y !== undefined) nombreY = pageData.nombre.y;
+                }
+                if (pageData.tipo) {
+                    if (pageData.tipo.x !== undefined) tipoX = pageData.tipo.x;
+                    if (pageData.tipo.y !== undefined) tipoY = pageData.tipo.y;
+                }
+                if (pageData.dni) {
+                    if (pageData.dni.x !== undefined) dniX = pageData.dni.x;
+                    if (pageData.dni.y !== undefined) dniY = pageData.dni.y;
+                }
+                if (pageData.numAdultos) {
+                    if (pageData.numAdultos.x !== undefined) numAdultosX = pageData.numAdultos.x;
+                    if (pageData.numAdultos.y !== undefined) numAdultosY = pageData.numAdultos.y;
+                }
+                if (pageData.numMenores) {
+                    if (pageData.numMenores.x !== undefined) numMenoresX = pageData.numMenores.x;
+                    if (pageData.numMenores.y !== undefined) numMenoresY = pageData.numMenores.y;
+                }
+            }
+
+            html += `<tr>
+                <td>Página ${p+1}</td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="nombre" data-axis="x" value="${nombreX}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="nombre" data-axis="y" value="${nombreY}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="tipo" data-axis="x" value="${tipoX}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="tipo" data-axis="y" value="${tipoY}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="dni" data-axis="x" value="${dniX}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="dni" data-axis="y" value="${dniY}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="numAdultos" data-axis="x" value="${numAdultosX}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="numAdultos" data-axis="y" value="${numAdultosY}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="numMenores" data-axis="x" value="${numMenoresX}"></td>
+                <td><input type="number" class="coord-input" data-page="${p}" data-field="numMenores" data-axis="y" value="${numMenoresY}"></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        coordsContainer.innerHTML = html;
+        saveDefaultsBtn.disabled = false;
+        resetDefaultsBtn.disabled = false;
+    }
+
+    function getCurrentCoordsArray() {
+        const inputs = document.querySelectorAll('.coord-input');
+        const pagesMap = {};
+        inputs.forEach(input => {
+            const page = input.dataset.page;
+            const field = input.dataset.field;
+            const axis = input.dataset.axis;
+            if (!pagesMap[page]) pagesMap[page] = { nombre: {}, tipo: {}, dni: {}, numAdultos: {}, numMenores: {} };
+            if (!pagesMap[page][field]) pagesMap[page][field] = {};
+            pagesMap[page][field][axis] = parseFloat(input.value) || 0;
+        });
+        const pageCount = Object.keys(pagesMap).length;
+        const coordsArray = [];
+        for (let i = 0; i < pageCount; i++) {
+            coordsArray[i] = pagesMap[i] || { nombre: {}, tipo: {}, dni: {}, numAdultos: {}, numMenores: {} };
+        }
+        return coordsArray;
+    }
+
+    function handleSaveDefaults() {
+        if (currentPdfPageCount === 0) { alert('Primero carga un PDF.'); return; }
+        const coordsArray = getCurrentCoordsArray();
+        saveDefaultsToStorage(coordsArray);
+        logInfo('Coordenadas personales guardadas.');
+        alert('✅ Coordenadas guardadas.');
+    }
+    function handleResetDefaults() {
+        if (currentPdfPageCount === 0) { alert('Primero carga un PDF.'); return; }
+        clearDefaults();
+        generateCoordsTable(currentPdfPageCount);
+        logInfo('Coordenadas personales restablecidas.');
+        alert('🔄 Valores restablecidos.');
+    }
+    saveDefaultsBtn.addEventListener('click', handleSaveDefaults);
+    resetDefaultsBtn.addEventListener('click', handleResetDefaults);
+
+    // --- Manejo de archivos ---
+    pdfInput.addEventListener('change', onPdfSelected);
+    productExcelInput.addEventListener('change', onProductExcelSelected);
+
+    async function onPdfSelected() {
+        const file = pdfInput.files[0];
+        if (!file) return;
+        pdfName.textContent = '📎 ' + file.name;
+        pdfName.style.display = 'block';
+        if (!checkLibs()) return;
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            templatePdfBytes = arrayBuffer;
+            const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+            currentPdfPageCount = pdfDoc.getPageCount();
+            generateCoordsTable(currentPdfPageCount);
+            logInfo(`PDF cargado: ${currentPdfPageCount} página(s).`);
+        } catch (e) {
+            logErr('Error al leer el PDF: ' + e.message);
+            coordsContainer.innerHTML = '<p class="text-danger">Error al cargar el PDF.</p>';
+            saveDefaultsBtn.disabled = true;
+            resetDefaultsBtn.disabled = true;
+        }
+    }
+
+    function onProductExcelSelected() {
+        const file = productExcelInput.files[0];
+        if (!file) return;
+        productExcelName.textContent = '📎 ' + file.name;
+        productExcelName.style.display = 'block';
+    }
+
+    // --- Parseo de datos pegados ---
+    function parseTable(text) {
+        const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+        if (lines.length < 2) return { headers: [], rows: [] };
+        const sep = lines[0].includes('\t') ? '\t' : /\s{2,}/;
+        const headers = lines[0].split(sep).map(s => s.trim());
+        const rows = lines.slice(1).map(line => {
+            let cells = line.split(sep).map(s => s.trim());
+            while (cells.length < headers.length) cells.push('');
+            return cells;
+        });
+        return { headers, rows };
+    }
+    function autoSelect(sel, headers, keywords) {
+        const lower = headers.map(h => h.toLowerCase());
+        const normalized = lower.map(h => h.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+        const idx = normalized.findIndex(h => keywords.some(k => h.includes(k)));
+        if (idx !== -1) sel.value = String(idx);
+    }
+    function rebuildSelects(headers) {
+        [colApellidos, colNombre, colTipo, colDNI, colNumAdultos, colNumMenores].forEach(sel => {
+            sel.innerHTML = '';
+            headers.forEach((h, i) => sel.add(new Option(h || `(columna ${i+1})`, i)));
+        });
+        autoSelect(colApellidos, headers, ['apellido']);
+        autoSelect(colNombre,    headers, ['nombre']);
+        autoSelect(colTipo,      headers, ['tipo', 'familia', 'categoria']);
+        autoSelect(colDNI,       headers, ['dni', 'nie', 'nif']);
+        autoSelect(colNumAdultos, headers, ['numero', 'adultos', 'n°', 'num', 'nº', 'n0']);
+        autoSelect(colNumMenores, headers, ['menores', 'ninos', 'niños']);
+
+    }
+    function updateUIMapping() {
+        const text = pasteArea.value.trim();
+        if (!text) {
+            mappingGrid.style.display = 'none';
+            noDataMsg.style.display = 'block';
+            previewInfo.style.display = 'none';
+            parsedHeaders = []; parsedRows = [];
+            return;
+        }
+        const { headers, rows } = parseTable(text);
+        parsedHeaders = headers; parsedRows = rows;
+        if (!headers.length) return;
+        rebuildSelects(headers);
+        mappingGrid.style.display = 'grid';
+        noDataMsg.style.display = 'none';
+        previewInfo.style.display = 'block';
+        previewInfo.textContent = `${rows.length} fila(s) detectada(s) con ${headers.length} columna(s).`;
+    }
+    pasteArea.addEventListener('input', updateUIMapping);
+
+    // --- Carga y parseo del Excel de productos (reglas) ---
+    async function loadProductRules(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+
+                    // --- FORCE RANGE TO START AT A1 ---
+                    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+                    range.s.c = 0; 
+                    range.s.r = 0; 
+                    
+                    const opts = { header: 1, defval: '', range: range };
+                    const rows = XLSX.utils.sheet_to_json(worksheet, opts);
+
+                    // Normalize rows to ensure safety when accessing columns
+                    const totalCols = range.e.c + 1;
+                    const paddedRows = rows.map(row => {
+                        const newRow = Array(totalCols).fill('');
+                        for (let i = 0; i < row.length; i++) {
+                            newRow[i] = row[i] !== undefined ? row[i] : '';
+                        }
+                        return newRow;
+                    });
+
+                    const rules = {};
+                    const extractionTasks = [];
+
+                    // 1. FULL SCAN PHASE: Find ALL "PRODUCTOS" headers anywhere in the sheet
+                    // We iterate through every row and every column.
+                    for (let r = 0; r < paddedRows.length; r++) {
+                        for (let c = 0; c < totalCols; c++) {
+                            const cellValue = String(paddedRows[r][c]).trim().toUpperCase();
+                            
+                            // Check if cell contains "PRODUCTOS"
+                            if (cellValue.includes('PRODUCTOS')) {
+                                console.log(`Tabla encontrada en: Fila ${r+1}, Columna ${c} (Texto: "${cellValue}")`);
+                                extractionTasks.push({
+                                    colIndex: c,
+                                    startRow: r + 1 // Data starts immediately below header
+                                });
+                            }
+                        }
+                    }
+
+                    if (extractionTasks.length === 0) {
+                        throw new Error("No se encontró la palabra 'PRODUCTOS' en ninguna celda.");
+                    }
+
+                    // 2. EXTRACTION PHASE: Process each detected table independently
+                    extractionTasks.forEach(task => {
+                        const { colIndex, startRow } = task;
+                        
+                        // Iterate downwards from the specific start row of this table
+                        for (let i = startRow; i < paddedRows.length; i++) {
+                            const row = paddedRows[i];
+                            const rawName = row[colIndex];
+                            
+                            const prodName = rawName ? String(rawName).trim() : '';
+
+                            // STOP CONDITION:
+                            // If we hit "TOTALES" (or "Total") in this column, stop this specific table's extraction.
+                            // We use .includes to be safe against "TOTALES " or " TOTALES"
+                            if (prodName.toUpperCase().includes('TOTALES')) {
+                                // console.log(`Fin de tabla (Fila ${i+1})`);
+                                break; 
+                            }
+
+                            // Also stop if we hit another "PRODUCTOS" header (e.g. stacked tables without TOTALES in between)
+                            if (prodName.toUpperCase().includes('PRODUCTOS')) {
+                                break;
+                            }
+
+                            // VALID DATA CHECK:
+                            if (prodName && prodName.length >= 2) {
+                                // Extract quantities from the next 4 columns (relative to the product column)
+                                // If a product appears in multiple tables, the last one found overwrites the previous one.
+                                rules[prodName] = {
+                                    1: row[colIndex + 1] || 0,
+                                    2: row[colIndex + 2] || 0,
+                                    3: row[colIndex + 3] || 0,
+                                    4: row[colIndex + 4] || 0
+                                };
+                            }
+                        }
+                    });
+
+                    const count = Object.keys(rules).length;
+                    console.log(`Carga completada. ${count} productos únicos extraídos.`);
+                    resolve(rules);
+
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    // --- Extraer posiciones de texto del PDF con pdf.js (LÓGICA: Buscar columna a la derecha) ---
+    async function extractTextPositions(pdfBytes) {
+        const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1);
+        const textContent = await page.getTextContent();
+
+        const items = textContent.items.map(item => ({
+            text: item.str,
+            x: item.transform[4],
+            y: item.transform[5] - 4, // Pequeño ajuste vertical
+            height: item.height || 10,
+            width: item.width || 30
+        }));
+
+        // 1. Detectar TODAS las cabeceras "CANTIDADES"
+        const qtyHeaders = items.filter(item => 
+            item.text.toUpperCase().includes('CANTI') || 
+            item.text.toUpperCase().includes('CANT.')
+        );
+
+        if (qtyHeaders.length < 2) {
+            console.error("Cabeceras encontradas:", qtyHeaders.map(i => i.text));
+            throw new Error(`Se esperaban 2 columnas de 'CANTIDADES', se encontraron ${qtyHeaders.length}.`);
+        }
+
+        // 2. Obtener coordenadas X únicas para las columnas de cantidad
+        // (Agrupamos las que estén muy cerca, por si el texto está fragmentado)
+        let qtyTargets = [];
+        qtyHeaders.forEach(h => {
+            const centerX = h.x + (h.width / 2);
+            // Solo añadir si no existe ya una coordenada cercana (margen de 20px)
+            if (!qtyTargets.some(t => Math.abs(t - centerX) < 20)) {
+                qtyTargets.push(centerX);
+            }
+        });
+
+        // Ordenar de izquierda a derecha [X_Columna1, X_Columna2]
+        qtyTargets.sort((a, b) => a - b);
+
+        // Asumimos que hay 2 columnas principales.
+        // Si hay más, la lógica seguirá funcionando (busca la más cercana), 
+        // pero necesitamos leftX y rightX para el bucle de dibujo final.
+        const leftDestX = qtyTargets[0];
+        const rightDestX = qtyTargets[1] || (leftDestX + 200); 
+
+        console.log(`Columnas de destino detectadas (X): ${qtyTargets.map(x => x.toFixed(1)).join(', ')}`);
+
+        // 3. Buscar productos y asignar lado
+        const productInfo = {};
+        const productNames = Object.keys(productRules);
+
+        productNames.forEach(prod => {
+            const prodLower = prod.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
+            let bestItem = null;
+            let bestScore = 0;
+
+            // Búsqueda difusa del nombre del producto
+            items.forEach(item => {
+                const itemText = item.text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
+                if (itemText.includes(prodLower) || prodLower.includes(itemText)) {
+                    const score = Math.min(itemText.length, prodLower.length) / Math.max(itemText.length, prodLower.length);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestItem = item;
+                    }
+                }
+            });
+
+            if (bestItem && bestScore > 0.65) {
+                const prodX = bestItem.x;
+                const centerY = bestItem.y + (bestItem.height / 2);
+
+                // --- NUEVA LÓGICA ESTRICTA ---
+                // 1. Filtrar columnas que están estrictamente a la DERECHA del producto
+                const validTargets = qtyTargets.filter(targetX => targetX > prodX);
+                
+                let assignedSide = 'left'; // fallback
+
+                if (validTargets.length > 0) {
+                    // 2. Ordenar por cercanía (la menor distancia positiva)
+                    // (Ya están ordenadas por sort anterior, la primera de validTargets es la más cercana)
+                    const closestTarget = validTargets[0];
+                    
+                    // 3. Mapear la coordenada encontrada a 'left' o 'right' para el dibujado
+                    if (Math.abs(closestTarget - leftDestX) < 10) {
+                        assignedSide = 'left';
+                    } else {
+                        assignedSide = 'right';
+                    }
+                    
+                    // console.log(`Prod: "${prod}" (X=${prodX.toFixed(0)}) -> Objetivo X=${closestTarget.toFixed(0)} -> Lado: ${assignedSide}`);
+                    
+                    productInfo[prod] = { y: centerY, side: assignedSide };
+                } else {
+                    console.warn(`Producto "${prod}" (X=${prodX}) no tiene columna de cantidad a su derecha. Ignorado.`);
+                }
+
+            }
+        });
+
+        return { 
+            leftX: leftDestX, 
+            rightX: rightDestX, 
+            productInfo 
+        };
+    }
+
+    // --- Procesamiento principal ---
+    processBtn.addEventListener('click', async function() {
+        hideAlert();
+        logEl.innerHTML = '';
+
+        if (!checkLibs()) {
+            showAlert('Librerías locales no disponibles. Revisa la carpeta "libs".');
+            return;
+        }
+
+        // Validaciones
+        const pdfFile = pdfInput.files[0];
+        if (!pdfFile) { showAlert('Selecciona un PDF en el paso 1.'); return; }
+        if (!parsedRows.length) { showAlert('Pega los datos de personas en el paso 2.'); return; }
+        const productExcelFile = productExcelInput.files[0];
+        if (!productExcelFile) { showAlert('Sube el Excel de productos en el paso 3.'); return; }
+        if (currentPdfPageCount === 0) { showAlert('Espera a que se cargue el PDF (paso 1).'); return; }
+
+        // Leer índices de columnas personales
+        const iApe = parseInt(colApellidos.value);
+        const iNom = parseInt(colNombre.value);
+        const iTip = parseInt(colTipo.value);
+        const iDni = parseInt(colDNI.value);
+        const iNumAdultos = parseInt(colNumAdultos.value);
+        const iNumMenores = parseInt(colNumMenores.value);
+        if (isNaN(iApe) || isNaN(iNom) || isNaN(iTip) || isNaN(iDni) || isNaN(iNumAdultos) || isNaN(iNumMenores)) {
+            showAlert('Asigna todas las columnas en el paso 4.');
+            return;
+        }
+
+        // Mapeo de tipos de familia (hardcodeado)
+        const FAMILY_MAPPING = {
+            'ind': 1, 'ind.': 1, '1': 1,
+            'fa': 2, 'fa.': 2, 'f.a.': 2, '2': 2,
+            'fb': 3, 'fb.': 3, 'f.b.': 3, '3': 3,
+            'fc': 4, 'fc.': 4, 'f.c.': 4, '4': 4
+        };
+
+        // Leer coordenadas personales
+        const personalCoords = getCurrentCoordsArray();
+
+        // Páginas seleccionadas
+        let selectedPages = [];
+        const pagesInputVal = pagesInput.value.trim();
+        if (!pagesInputVal) {
+            selectedPages = Array.from({ length: currentPdfPageCount }, (_, i) => i);
+        } else {
+            const parts = pagesInputVal.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 1 && n <= currentPdfPageCount);
+            if (parts.length === 0) {
+                logWarn('Selección de páginas vacía o inválida. Se usará la página 1.');
+                selectedPages = [0];
+            } else {
+                selectedPages = parts.map(p => p - 1);
+            }
+        }
+
+        // Cargar reglas de productos
+        logInfo('Cargando Excel de productos...');
+        try {
+            productRules = await loadProductRules(productExcelFile);
+            logOk(`Reglas cargadas: ${Object.keys(productRules).length} productos.`);
+        } catch (e) {
+            logErr('Error al leer Excel de productos: ' + e.message);
+            showAlert('Error con el Excel de productos.');
+            return;
+        }
+
+        // Extraer posiciones del PDF (primera página)
+        logInfo('Analizando plantilla PDF para encontrar productos y columnas izquierda/derecha...');
+        try {
+            const pdfBytes = await pdfFile.arrayBuffer();
+            textPositions = await extractTextPositions(pdfBytes);
+            logOk(`Columna izquierda detectada en X=${textPositions.leftX.toFixed(1)}, derecha en X=${textPositions.rightX.toFixed(1)}.`);
+            const ubicados = Object.keys(textPositions.productInfo).length;
+            logOk(`Productos ubicados: ${ubicados} de ${Object.keys(productRules).length}.`);
+            if (ubicados === 0) {
+                throw new Error('No se pudo ubicar ningún producto en el PDF. Revisa que los nombres coincidan exactamente.');
+            }
+        } catch (e) {
+            logErr('Error al extraer posiciones del PDF: ' + e.message);
+            showAlert('No se pudieron detectar las posiciones. ' + e.message);
+            processBtn.disabled = false;
+            return;
+        }
+
+        // Preparar generación
+        processBtn.disabled = true;
+        progressWrap.style.display = 'block';
+        setProgress(0, parsedRows.length);
+
+        const zip = new JSZip();
+        const folder = zip.folder('fichas');
+        let generated = 0, errors = 0;
+
+        // Cargar plantilla PDF una vez
+        let templatePdfDoc;
+        try {
+            templatePdfDoc = await PDFLib.PDFDocument.load(templatePdfBytes, { ignoreEncryption: true });
+        } catch (e) {
+            logErr('Error al cargar la plantilla PDF: ' + e.message);
+            processBtn.disabled = false;
+            return;
+        }
+
+        for (let i = 0; i < parsedRows.length; i++) {
+            const cells = parsedRows[i];
+            const apellidos = (cells[iApe] || '').trim();
+            const nombre = (cells[iNom] || '').trim();
+            const tipoRaw = (cells[iTip] || '').trim();
+            const dni = (cells[iDni] || '').trim();
+            const numAdultos = (cells[iNumAdultos] || '').trim();
+            const numMenores = (cells[iNumMenores] || '').trim();
+
+            if (!apellidos && !nombre && !dni && !numAdultos && !numMenores) {
+                logWarn(`Fila ${i+2}: vacía, omitida.`);
+                setProgress(i+1, parsedRows.length);
+                continue;
+            }
+
+            // Determinar familia ID
+            const tipoKey = tipoRaw.toLowerCase().replace(/\s+/g, '');
+            let familyId = FAMILY_MAPPING[tipoKey] || 1; // valor por defecto 1
+            if (!familyId) {
+                logWarn(`Fila ${i+2}: Tipo "${tipoRaw}" no reconocido. Se usará familia 1.`);
+            }
+
+            const fullName = [apellidos, nombre].filter(Boolean).join(' ');
+
+            try {
+                // Crear nuevo documento copiando todas las páginas
+                const newDoc = await PDFLib.PDFDocument.create();
+                const pageIndices = templatePdfDoc.getPageIndices();
+                const copiedPages = await newDoc.copyPages(templatePdfDoc, pageIndices);
+                copiedPages.forEach(p => newDoc.addPage(p));
+
+                const pages = newDoc.getPages();
+                const font = await newDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                const black = PDFLib.rgb(0, 0, 0);
+
+                // Dibujar campos personales en páginas seleccionadas
+                for (const pageIdx of selectedPages) {
+                    if (pageIdx >= pages.length) continue;
+                    const page = pages[pageIdx];
+                    const coords = personalCoords[pageIdx] || {};
+                    const draw = (field, text) => {
+                        if (!text) return;
+                        const x = coords[field]?.x;
+                        const y = coords[field]?.y;
+                        if (x !== undefined && y !== undefined) {
+                            page.drawText(text, { x, y, size: 10, font, color: black });
+                        }
+                    };
+                    draw('nombre', fullName);
+                    draw('tipo', tipoRaw);
+                    draw('dni', dni);
+                    draw('numAdultos', numAdultos);
+                    draw('numMenores', numMenores);
+                }
+
+                // Dibujar cantidades de productos en la primera página
+                if (pages.length > 0) {
+                    const firstPage = pages[0];
+                    const { leftX, rightX, productInfo } = textPositions;
+                    for (const [prod, qtyByFamily] of Object.entries(productRules)) {
+                        const info = productInfo[prod];
+                        if (!info) continue; // producto no ubicado
+                        const qty = qtyByFamily[familyId];
+                        if (qty && qty > 0) {
+                            const x = info.side === 'left' ? leftX : rightX;
+                            console.log(`Dibujando ${qty} para "${prod}" en X=${x.toFixed(1)}, Y=${info.y.toFixed(1)} (familia ${familyId})`);
+                            firstPage.drawText(String(qty), {
+                                x: x,
+                                y: info.y,
+                                size: 9,
+                                font,
+                                color: black
+                            });
+                        }
+                    }
+                }
+
+                const pdfBytes = await newDoc.save();
+
+                // Nombre de archivo seguro
+                const safeName = fullName
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-zA-Z0-9 _-]/g, '_')
+                    .trim().substring(0, 60) || `fila_${i+2}`;
+
+                folder.file(`${i+2}_${safeName}.pdf`, pdfBytes);
+                logOk(`Ficha ${i+2}: ${fullName} (familia ${familyId})`);
+                generated++;
+            } catch (e) {
+                logErr(`Fila ${i+2} (${fullName}): ${e.message}`);
+                errors++;
+            }
+
+            setProgress(i+1, parsedRows.length);
+        }
+
+        if (generated === 0) {
+            logErr('No se generó ninguna ficha.');
+            showAlert('No se generó ninguna ficha. Revisa el log.');
+            processBtn.disabled = false;
+            return;
+        }
+
+        logInfo('Creando ZIP...');
+        try {
+            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'fichas.zip';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            logOk(`Completado! ${generated} ficha(s) generada(s). Descargando...`);
+            progressLabel.textContent = `Completado: ${generated} fichas.`;
+        } catch (e) {
+            logErr('Error al crear ZIP: ' + e.message);
+        }
+
+        processBtn.disabled = false;
+    });
+
+    // Drag & drop para PDF
+    const pdfDrop = document.getElementById('pdfDrop');
+    pdfDrop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        pdfDrop.classList.remove('over');
+        const file = e.dataTransfer.files[0];
+        if (file && file.name.toLowerCase().endsWith('.pdf')) {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            pdfInput.files = dt.files;
+            pdfName.textContent = '📎 ' + file.name;
+            pdfName.style.display = 'block';
+            onPdfSelected();
+        }
+    });
+    pdfDrop.addEventListener('dragover', (e) => { e.preventDefault(); pdfDrop.classList.add('over'); });
+    pdfDrop.addEventListener('dragleave', () => pdfDrop.classList.remove('over'));
+
+    // Drag & drop para Excel productos
+    const productExcelDrop = document.getElementById('productExcelDrop');
+    productExcelDrop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        productExcelDrop.classList.remove('over');
+        const file = e.dataTransfer.files[0];
+        if (file && (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls'))) {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            productExcelInput.files = dt.files;
+            productExcelName.textContent = '📎 ' + file.name;
+            productExcelName.style.display = 'block';
+        }
+    });
+    productExcelDrop.addEventListener('dragover', (e) => { e.preventDefault(); productExcelDrop.classList.add('over'); });
+    productExcelDrop.addEventListener('dragleave', () => productExcelDrop.classList.remove('over'));
+
+    // Colapsar/expandir paso 4
+    const step4Header = document.getElementById('step4Header');
+    const step4Content = document.getElementById('step4Content');
+    const step4Toggle = document.getElementById('step4Toggle');
+
+    if (step4Header && step4Content && step4Toggle) {
+        // Por defecto lo queremos colapsado
+        step4Content.style.display = 'none';
+        step4Toggle.textContent = '►';
+
+        step4Header.addEventListener('click', () => {
+            const isHidden = step4Content.style.display === 'none';
+            step4Content.style.display = isHidden ? 'block' : 'none';
+            step4Toggle.textContent = isHidden ? '▼' : '►';
+        });
+    }
+
+    // Colapsar/expandir paso 5
+    const step5Header = document.getElementById('step5Header');
+    const step5Content = document.getElementById('step5Content');
+    const step5Toggle = document.getElementById('step5Toggle');
+
+    if (step5Header && step5Content && step5Toggle) {
+        // Por defecto lo queremos colapsado
+        step5Content.style.display = 'none';
+        step5Toggle.textContent = '►';
+
+        step5Header.addEventListener('click', () => {
+            const isHidden = step5Content.style.display === 'none';
+            step5Content.style.display = isHidden ? 'block' : 'none';
+            step5Toggle.textContent = isHidden ? '▼' : '►';
+        });
+    }
+
+    // Inicializar comprobación de librerías
+    window.addEventListener('load', () => { setTimeout(checkLibs, 500); });
+})();
+</script>
+
+<!-- INSTRUCCIONES PARA LIBRERÍAS LOCALES -->
+<div style="margin-top: 2rem; padding: 1rem; background: #f1f5f9; border-radius: 8px; font-size: 0.85rem;">
+    <strong>📁 Instrucciones para librerías locales:</strong><br>
+    1. Crea una carpeta llamada <code>libs</code> en el mismo lugar donde guardes este HTML.<br>
+    2. Descarga los siguientes archivos y colócalos dentro de <code>libs</code>:<br>
+    &nbsp;&nbsp;• <a href="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js" target="_blank">pdf-lib.min.js</a><br>
+    &nbsp;&nbsp;• <a href="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" target="_blank">jszip.min.js</a><br>
+    &nbsp;&nbsp;• <a href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js" target="_blank">pdf.min.js</a><br>
+    &nbsp;&nbsp;• <a href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js" target="_blank">pdf.worker.min.js</a> (necesario para pdf.js)<br>
+    &nbsp;&nbsp;• <a href="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js" target="_blank">xlsx.full.min.js</a><br>
+    3. Si los nombres de archivo difieren, ajusta las rutas en las etiquetas &lt;script&gt;.
+</div>
+</body>
+</html>
